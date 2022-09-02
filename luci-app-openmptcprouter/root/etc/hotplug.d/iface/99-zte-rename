@@ -2,14 +2,28 @@
 
 set -e
 
+logger -t zte-rename $(env)
+
+[ "$ACTION" = "ifup" ] || exit
+
 _disable_interface() {
     local NAME=$1
     logger -t zte-rename "Setting interface $NAME disabled=1"
     uci set "network.${NAME}.disabled=1" || logger -t zte-rename "Failed to set ${NAME} disabled"
     uci commit network || logger -t zte-rename "Commit failed"
     logger -t zte-rename $(uci show "network.${NAME}")
-    ubus call network reload || { logger -t zte-rename "Network reload failed status $?" && exit; }
-    sleep 10s
+}
+
+_disable_interface_by_device() {
+    local INTFNAME=$1
+    local TARGET=$2
+    local DEVICE
+    config_get DEVICE $INTFNAME device
+    logger -t zte-rename "Interface $INTFNAME uses device $DEVICE, looking for $TARGET"
+    
+    if [ $DEVICE = $TARGET ]; then
+        _disable_interface $INTFNAME
+    fi
 }
 
 _enable_interface() {
@@ -18,25 +32,28 @@ _enable_interface() {
     uci delete "network.${NAME}.disabled" || logger -t zte-rename "Failed to enable ${NAME}"
     uci commit network || logger -t zte-rename "Commit failed"
     logger -t zte-rename $(uci show "network.${NAME}")
-    ubus call network reload || { logger -t zte-rename "Network reload failed status $?" && exit; }
-    sleep 10s
+}
+
+_enable_interface_by_device() {
+    local INTFNAME=$1
+    local TARGET=$2
+    local DEVICE
+    config_get DEVICE $INTFNAME device
+    logger -t zte-rename "Interface $INTFNAME uses device $DEVICE, looking for $TARGET"
+
+    if [ $DEVICE = $TARGET ]; then
+        _enable_interface $INTFNAME
+    fi
 }
 
 _rename_device() {
     local OLD=$1
     local NEW=$2
 
-    # logger -t zte-rename "taking down device $OLD"
-    # ip link set ${OLD} down 2>&1 >/dev/null || logger -t zte-rename "Failed to set $OLD down"
-
     logger -t zte-rename "renaming device $OLD to $NEW"
     ip link set ${OLD} name ${NEW} 2>&1 >/dev/null || logger -t zte-rename "Failed to set $OLD name to $NEW"
-    # sleep 5s
 }
 
-logger -t zte-rename $(env)
-
-[ "$ACTION" = "ifup" ] || exit
 
 PID=$(cat /sys/class/net/$DEVICE/device/uevent | grep PRODUCT | cut -d '=' -f2 | tr -d '\n')
 
@@ -49,47 +66,53 @@ logger -t zte-rename "ip: $IP4"
 
 case $IP4 in
     "192.168.0")
-        IFNAME="eth1"
+        NEWNAME="eth1"
         ;;
     "192.168.1")
-        IFNAME="eth2"
+        NEWNAME="eth2"
         ;;
     *)
         logger -t zte-rename "Unknown IP, exiting"
         exit
 esac
 
-[ $DEVICE != $IFNAME ] || {
+[ $DEVICE != $NEWNAME ] || {
     logger -t zte-rename "Interface name correct, nothing to do"
     exit
 }
 
-logger -t zte-rename "Need to rename $DEVICE with IP $IP4 to $IFNAME"
+logger -t zte-rename "Need to rename $DEVICE with IP $IP4 to $NEWNAME"
 
-# logger -t zte-rename $(lsusb)
-# ZTE_COUNT=$(lsusb | grep 19d2 | wc -l)
-# logger -t zte-rename "Seen ${ZTE_COUNT} zte devices"
-
-# logger -t zte-rename "Stopping network"
-# /etc/init.d/network stop
-
+# disable whatever random WRT interface is using this device
 _disable_interface "$INTERFACE"
 
+# disable any the WRT interface that uses the fixed device name
+config_load network
+config_foreach _disable_interface_by_device interface "$NEWNAME"
+
+# actually disable the WRT interfaces
+ubus call network reload || { logger -t zte-rename "Disable reload failed status $?" && exit; }
+sleep 10s
+
+# if the new device exists, rename it out of the way
 EXISTIF="0"
-
-[ "$(ip link show ${IFNAME} 2>/dev/null)" != "" ] && {
-    logger -t zte-rename "Device $IFNAME already exists, swapping $DEVICE <-> $IFNAME"
-
-    _rename_device "$IFNAME" "${IFNAME}tmp"
+[ "$(ip link show ${NEWNAME} 2>/dev/null)" != "" ] && {
+    logger -t zte-rename "Device $NEWNAME already exists, swapping $DEVICE <-> $NEWNAME"
+    _rename_device "$NEWNAME" "${NEWNAME}tmp"
     EXISTIF="1"
 }
 
-_rename_device "$DEVICE" "$IFNAME"
+_rename_device "$DEVICE" "$NEWNAME"
 
+[ "$EXISTIF" = "1" ] && {
+    _rename_device "${NEWNAME}tmp" "$DEVICE"
+
+}
+
+# bring back the WRT interface that uses the renamed device and the one we disabled
+config_foreach _enable_interface_by_device interface "$NEWNAME"
 _enable_interface "$INTERFACE"
 
-[ "$EXISTIF" = "1" ] && _rename_device "${IFNAME}tmp" "$DEVICE"
-
-# logger -t zte-rename "Restarting network"
-# sleep 5s
-# /etc/init.d/network restart
+# actually enable after the renames
+ubus call network reload || { logger -t zte-rename "Enable reload failed status $?" && exit; }
+sleep 10s
