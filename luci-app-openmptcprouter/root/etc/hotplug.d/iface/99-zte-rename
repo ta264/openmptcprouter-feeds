@@ -1,0 +1,95 @@
+#!/bin/bash
+
+set -e
+
+_disable_interface() {
+    local NAME=$1
+    logger -t zte-rename "Setting interface $NAME disabled=1"
+    uci set "network.${NAME}.disabled=1" || logger -t zte-rename "Failed to set ${NAME} disabled"
+    uci commit network || logger -t zte-rename "Commit failed"
+    logger -t zte-rename $(uci show "network.${NAME}")
+    ubus call network reload || { logger -t zte-rename "Network reload failed status $?" && exit; }
+    sleep 10s
+}
+
+_enable_interface() {
+    local NAME=$1
+    logger -t zte-rename "Setting interface $NAME enabled"
+    uci delete "network.${NAME}.disabled" || logger -t zte-rename "Failed to enable ${NAME}"
+    uci commit network || logger -t zte-rename "Commit failed"
+    logger -t zte-rename $(uci show "network.${NAME}")
+    ubus call network reload || { logger -t zte-rename "Network reload failed status $?" && exit; }
+    sleep 10s
+}
+
+_rename_device() {
+    local OLD=$1
+    local NEW=$2
+
+    # logger -t zte-rename "taking down device $OLD"
+    # ip link set ${OLD} down 2>&1 >/dev/null || logger -t zte-rename "Failed to set $OLD down"
+
+    logger -t zte-rename "renaming device $OLD to $NEW"
+    ip link set ${OLD} name ${NEW} 2>&1 >/dev/null || logger -t zte-rename "Failed to set $OLD name to $NEW"
+    # sleep 5s
+}
+
+logger -t zte-rename $(env)
+
+[ "$ACTION" = "ifup" ] || exit
+
+PID=$(cat /sys/class/net/$DEVICE/device/uevent | grep PRODUCT | cut -d '=' -f2 | tr -d '\n')
+
+[ $PID = "19d2/1403/5418" ] || exit
+
+logger -t zte-rename "found ZTE device"
+
+IP4=$(ip -o -4 addr list $DEVICE | awk '{print $4}' | cut -d/ -f1 | sed 's/\.[^.]*$//')
+logger -t zte-rename "ip: $IP4"
+
+case $IP4 in
+    "192.168.0")
+        IFNAME="eth1"
+        ;;
+    "192.168.1")
+        IFNAME="eth2"
+        ;;
+    *)
+        logger -t zte-rename "Unknown IP, exiting"
+        exit
+esac
+
+[ $DEVICE != $IFNAME ] || {
+    logger -t zte-rename "Interface name correct, nothing to do"
+    exit
+}
+
+logger -t zte-rename "Need to rename $DEVICE with IP $IP4 to $IFNAME"
+
+# logger -t zte-rename $(lsusb)
+# ZTE_COUNT=$(lsusb | grep 19d2 | wc -l)
+# logger -t zte-rename "Seen ${ZTE_COUNT} zte devices"
+
+# logger -t zte-rename "Stopping network"
+# /etc/init.d/network stop
+
+_disable_interface "$INTERFACE"
+
+EXISTIF="0"
+
+[ "$(ip link show ${IFNAME} 2>/dev/null)" != "" ] && {
+    logger -t zte-rename "Device $IFNAME already exists, swapping $DEVICE <-> $IFNAME"
+
+    _rename_device "$IFNAME" "${IFNAME}tmp"
+    EXISTIF="1"
+}
+
+_rename_device "$DEVICE" "$IFNAME"
+
+_enable_interface "$INTERFACE"
+
+[ "$EXISTIF" = "1" ] && _rename_device "${IFNAME}tmp" "$DEVICE"
+
+# logger -t zte-rename "Restarting network"
+# sleep 5s
+# /etc/init.d/network restart
