@@ -1,0 +1,19 @@
+#!/bin/bash
+
+set -e
+
+# get ip of omr droplet
+ID=$(curl -s -X GET \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer $DIGITALOCEAN_TOKEN" \
+          "https://api.digitalocean.com/v2/droplets" | \
+         jq -r '.droplets[] | select(.name == "omr-59") | .id')
+
+echo "found droplet $ID"
+
+curl -X DELETE \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer $DIGITALOCEAN_TOKEN" \
+       "https://api.digitalocean.com/v2/droplets/$ID"
+
+echo "destroyed droplet $ID"
