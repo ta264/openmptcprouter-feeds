@@ -1,0 +1,19 @@
+#!/bin/bash
+
+set -e
+
+logger -t zte-mac $(env)
+
+[ "$ACTION" = "add" ] || [ "$ACTION" = "bind" ] || exit
+[ -n "${INTERFACE}" ] || exit
+FILE=/sys/class/net/${INTERFACE}/address
+[ -n "${FILE}" ] || exit
+
+MAC="$(cat ${FILE} | tr -d '\n')"
+
+[ "$MAC" = "34:4b:50:00:00:00" ] && {
+    NEWMAC="34:4b:50$(hexdump -n3 -e '/1 ":%02x"' /dev/random)"
+
+    logger -t zte-mac "setting device $INTERFACE address to $NEWMAC"
+    ip link set ${INTERFACE} address ${NEWMAC} 2>&1 >/dev/null || logger -t zte-mac "Failed to set address"
+}
