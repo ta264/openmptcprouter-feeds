@@ -1278,11 +1278,7 @@ function interfaces_status()
 			gateway6 = ut.trim(sys.exec("ip -6 r list dev " .. ifname .. " | grep via | grep -v default | grep -v metric | awk '{print $1}' | tr -d '\n'"))
 		end
 	    end
-	    local signal = ""
-	    local operator = ""
-	    local phonenumber = ""
-	    local donglestate = ""
-	    local networktype = ""
+
 	    if gateway ~= "" or gateway6 ~= "" then
 		    if uci:get("openmptcprouter", "settings", "disablegwping") ~= "1" and connectivity ~= "ERROR" then
 			    if gateway ~= "" then
@@ -1318,8 +1314,42 @@ function interfaces_status()
 				gw_ping6 = "DOWN"
 			    end
 		    end
-		    if uci:get("openmptcprouter", interface, "manufacturer") == "huawei" and ipaddr ~= "" then
-			    intfdata = ut.trim(sys.exec("omr-huawei " .. ipaddr .. " " .. gateway .. " all"))
+            elseif gateway == "" and gateway6 == "" then
+		    gw_ping = "DOWN"
+		    connectivity = "ERROR"
+            end
+
+            local modeminterface = interface
+            local modemifname = ifname
+            local modemipaddr = ipaddr
+            local modemgateway = gateway
+            
+            local baseinterface = uci:get("openmptcprouter", interface, "baseintf") or interface
+            
+            if baseinterface ~= "" and baseinterface ~= modeminterface then
+               modeminterface = baseinterface
+               modemifname = get_device(modeminterface) or ""
+
+               if modemifname ~= nil and modemifname ~= "" and proto ~= "dhcpv6" then
+                  modemipaddr = ut.trim(sys.exec("ip -4 -br addr ls dev " .. modemifname .. " | awk -F'[ /]+' '{print $3}' | tr -d '\n'"))
+                  modemgateway = get_gateway(baseinterface)
+               end
+
+            end
+
+            -- sys.exec("logger -t interface_status modeminterface: " .. modeminterface .. " modemdevice: " .. modemifname .. " modemip: " .. modemipaddr .. " modemgateway: " .. modemgateway)
+            
+	    local signal = ""
+	    local operator = ""
+	    local phonenumber = ""
+	    local donglestate = ""
+	    local networktype = ""
+            
+	    if modemgateway ~= "" or gateway6 ~= "" then
+                    manufacturer = uci:get("openmptcprouter", modeminterface, "manufacturer")
+                    
+		    if (manufacturer == "huawei" or manufacturer == "zte") and modemipaddr ~= "" then
+			    intfdata = ut.trim(sys.exec("omr-" .. manufacturer .. " " .. modemipaddr .. " " .. modemgateway .. " all"))
 			    if intfdata ~= "" then
 				    signal = ut.trim(sys.exec("echo '".. intfdata .. "' | awk -F';' '{print $1}'"))
 				    operator = ut.trim(sys.exec("echo '".. intfdata .. "' | awk -F';' '{print $2}'"))
@@ -1328,12 +1358,9 @@ function interfaces_status()
 				    networktype = ut.trim(sys.exec("echo '".. intfdata .. "' | awk -F';' '{print $5}'"))
 			    end
 		    end
-	    elseif gateway == "" and gateway6 == "" then
-		    gw_ping = "DOWN"
-		    connectivity = "ERROR"
 	    end
 	    
-	    if ifname ~= "" and ifname ~= nil then
+	    if modemifname ~= "" and modemifname ~= nil then
 		    --local proto = section['proto']
 		    if proto == "qmi" then
 			    local device = section['device']

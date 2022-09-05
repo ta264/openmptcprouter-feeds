@@ -1,0 +1,24 @@
+#!/bin/sh
+INTF_IP=`echo $1 | grep -E '^(192\.168|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.)'`
+[ -z "$INTF_IP" ] && return
+MODEM_IP=`echo $2 | grep -E '^(192\.168|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.)'`
+[ -z "$MODEM_IP" ] && return
+INFO=$3
+tmpfile=$(mktemp)
+curl -s -m 1 curl -H "Referer: http://${MODEM_IP}/index.html" "http://${MODEM_IP}/goform/goform_get_cmd_process?isTest=false&multi_data=1&cmd=signalbar,network_type,network_provider,msisdn,modem_main_state" > ${tmpfile}
+SIGNAL_BAR=$(cat ${tmpfile} | sed 's/.*"signalbar":"\([^"]*\)".*/\1/g')
+PERCENT=$((20 * ${SIGNAL_BAR}))
+TYPE=$(cat ${tmpfile} | sed 's/.*"network_type":"\([^"]*\)".*/\1/g')
+OPERATOR=$(cat ${tmpfile} | sed 's/.*"network_provider":"\([^"]*\)".*/\1/g')
+STATE=""
+# CONNECTSTATE=$(cat ${tmpfile} | grep ConnectionStatus | sed -e 's/<[^>]*>//g' | sed 's/[^\x00-\x7F]//g')
+# [ "$CONNECTSTATE" = "201" ] && STATE="connection failed, bandwidth exceeded"
+# [ "$CONNECTSTATE" = "900" ] && STATE="connecting"
+# [ "$CONNECTSTATE" = "901" ] && STATE="connected"
+# [ "$CONNECTSTATE" = "902" ] && STATE="disconnected"
+# [ "$CONNECTSTATE" = "903" ] && STATE="disconnecting"
+# [ "$CONNECTSTATE" = "904" ] && STATE="connection failed or disabled"
+NUMBER=$(cat ${tmpfile} | sed 's/.*"msisdn":"\([^"]*\)".*/\1/g')
+rm -f ${tmpfile}
+[ -z "$INFO" ] && echo "$PERCENT"
+[ "$INFO" = "all" ] && echo "$PERCENT;$OPERATOR;$NUMBER;$STATE;$TYPE"

@@ -1505,8 +1505,10 @@ if [ -n "$OMR_TRACKER_INTERFACE" ] && ([ "$(uci -q get openmptcprouter.$OMR_TRAC
 	#	uci -q set openmptcprouter.$OMR_TRACKER_INTERFACE.state=$(echo $intfdata | awk -F";" '{print $4}')
 	#else
 	if [ "$proto" != "qmi" ] && [ "$proto" != "modemmanager" ]; then
-		if [ -n "$OMR_TRACKER_DEVICE_GATEWAY" ] && [ -n "$OMR_TRACKER_DEVICE_IP" ] && [ -n "$(curl --interface $OMR_TRACKER_DEVICE_IP -s -m 2 -X GET http://$OMR_TRACKER_DEVICE_GATEWAY/api/webserver/SesTokInfo)" ]; then
+		if [ -n "$OMR_TRACKER_DEVICE_GATEWAY" ] && [ -n "$OMR_TRACKER_DEVICE_IP" ] && [ "$(curl --interface $OMR_TRACKER_DEVICE_IP -s -m 2 -w '%{http_code}' -o /dev/null -X GET http://$OMR_TRACKER_DEVICE_GATEWAY/api/webserver/SesTokInfo)" = "200" ]; then
 			uci -q set openmptcprouter.$OMR_TRACKER_INTERFACE.manufacturer='huawei'
+                elif [ -n "$OMR_TRACKER_DEVICE_GATEWAY" ] && [ -n "$OMR_TRACKER_DEVICE_IP" ] && [ "$(curl --interface $OMR_TRACKER_DEVICE_IP -s -m 2 -w '%{http_code}' -o /dev/null -X GET -H "Referer: http://${OMR_TRACKER_DEVICE_GATEWAY}/index.html" "http://${OMR_TRACKER_DEVICE_GATEWAY}/goform/goform_get_cmd_process?isTest=false&cmd=imei")" = "200" ]; then
+               	        uci -q set openmptcprouter.$OMR_TRACKER_INTERFACE.manufacturer='zte'
 		else
 			uci -q delete openmptcprouter.$OMR_TRACKER_INTERFACE.manufacturer
 		fi
